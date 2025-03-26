@@ -69,19 +69,29 @@ public class Main {
 
     private static double calculateTotalGrossAmount(List<String[]> tableData) {
         double total = 0.0;
-        for(String[] row : tableData){
-            try{
-                double grossAmount = Double.parseDouble(row[3].replace(",", ""));
-                total += grossAmount;
-            } catch (NumberFormatException e) {
-                throw new RuntimeException(e);
+
+        for (String[] row : tableData) {
+            if (row.length > 3) { // Check if the row has at least 4 columns
+                try {
+                    String grossAmountStr = row[3].trim();
+                    if (!grossAmountStr.isEmpty()) { // Check if the gross amount is not empty
+                        double grossAmount = Double.parseDouble(grossAmountStr.replace(",", ""));
+                        total += grossAmount;
+                    }
+                } catch (NumberFormatException e) {
+                    // Handle invalid number format gracefully
+                    System.err.println("Invalid gross amount format in row: " + e.getMessage());
+                }
+            } else {
+                System.err.println("Row has fewer than 4 columns, skipping.");
             }
         }
+
         return total;
     }
 
-    private static String[] extractPaymentDetails(String pdfPath) throws IOException{
-        try(PDDocument document = PDDocument.load(new File(pdfPath))){
+    private static String[] extractPaymentDetails(String pdfPath) throws IOException {
+        try (PDDocument document = PDDocument.load(new File(pdfPath))) {
             ObjectExtractor extractor = new ObjectExtractor(document);
             SpreadsheetExtractionAlgorithm algo = new SpreadsheetExtractionAlgorithm();
 
@@ -89,14 +99,21 @@ public class Main {
                 Page page = it.next();
                 List<Table> tables = algo.extract(page);
 
-                for(Table table : tables){
-                    for(int row=0; row<table.getRowCount(); row++){
-                        String paymentDocument = table.getCell(row,0).getText().trim();
-                        String currency = table.getCell(row, 2).getText().trim();
+                for (Table table : tables) {
+                    for (int row = 0; row < table.getRowCount(); row++) {
+                        // Ensure row has enough columns before accessing
+                        if (table.getColCount() > 2) {
+                            String paymentDocument = table.getCell(row, 0).getText().trim();
+                            String currency = table.getCell(row, 2).getText().trim();
 
-                        if(paymentDocument.toLowerCase().contains("payment document")){
-                            extractor.close();
-                            return new String[]{paymentDocument, currency};
+                            // Validate that both fields are non-empty
+                            if (!paymentDocument.isEmpty() && !currency.isEmpty() &&
+                                    paymentDocument.toLowerCase().contains("payment document")) {
+                                extractor.close();
+                                return new String[]{paymentDocument, currency};
+                            }
+                        } else {
+                            System.err.println("Row does not have enough columns, skipping.");
                         }
                     }
                 }
@@ -106,9 +123,9 @@ public class Main {
         return null;
     }
 
+
     private static String[] extractSupplierDetails(String pdfPath) throws IOException {
-        try (
-                PDDocument document = PDDocument.load(new File(pdfPath))) {
+        try (PDDocument document = PDDocument.load(new File(pdfPath))) {
             ObjectExtractor extractor = new ObjectExtractor(document);
             SpreadsheetExtractionAlgorithm algo = new SpreadsheetExtractionAlgorithm();
 
@@ -119,13 +136,19 @@ public class Main {
                 if (!tables.isEmpty()) {
                     Table table = tables.get(0);
                     if (table.getRowCount() > 0 && table.getColCount() > 1) {
+                        // Extracting values and checking for empty fields
                         String supplier = table.getCell(1, 1).getText().trim();
-                        String supplerNo = table.getCell(1, 3).getText().trim();
-                        String date = table.getCell(1,4).getText();
-                        extractor.close();
-                        return new String[]{"Supplier: " + supplier,
-                                "Supplier No.: " + supplerNo,
-                                date };
+                        String supplierNo = table.getCell(1, 3).getText().trim();
+                        String date = table.getCell(1, 4).getText().trim();
+
+                        if (!supplier.isEmpty() && !supplierNo.isEmpty() && !date.isEmpty()) {
+                            extractor.close();
+                            return new String[]{
+                                    "Supplier: " + supplier,
+                                    "Supplier No.: " + supplierNo,
+                                     date
+                            };
+                        }
                     }
                 }
             }
@@ -138,29 +161,42 @@ public class Main {
     private static List<String[]> extractTableDataFromPdf(String pdfPath) throws IOException {
         List<String[]> tableData = new ArrayList<>();
 
-        try(PDDocument document = PDDocument.load(new File(pdfPath))){
+        try (PDDocument document = PDDocument.load(new File(pdfPath))) {
             ObjectExtractor extractor = new ObjectExtractor(document);
             SpreadsheetExtractionAlgorithm algo = new SpreadsheetExtractionAlgorithm();
 
             for (PageIterator it = extractor.extract(); it.hasNext(); ) {
                 Page page = it.next();
                 List<Table> tables = algo.extract(page);
-                for(Table table : tables){
-                    for(int row=0; row<table.getRowCount(); row++){
-                        String firstColumn = table.getCell(row,0).getText().trim();
-                        if(row < 3) continue;
 
-                        if(firstColumn.toLowerCase().contains("sum total") || firstColumn.toLowerCase().contains("balance carry forward") || firstColumn.toLowerCase().contains("invoice document") || firstColumn.toLowerCase().contains("payment document")){
+                for (Table table : tables) {
+                    for (int row = 0; row < table.getRowCount(); row++) {
+                        String firstColumn = table.getCell(row, 0).getText().trim();
+                        if (row < 3) continue;
+
+                        if (firstColumn.toLowerCase().contains("sum total") ||
+                                firstColumn.toLowerCase().contains("balance carry forward") ||
+                                firstColumn.toLowerCase().contains("invoice document") ||
+                                firstColumn.toLowerCase().contains("payment document")) {
                             continue;
                         }
 
                         int columnCount = table.getColCount();
                         String[] rowData = new String[columnCount];
+                        boolean isEmpty = false;
 
-                        for(int col=0;col<columnCount ;col++){
-                            rowData[col]=table.getCell(row,col).getText().trim();
+                        for (int col = 0; col < columnCount; col++) {
+                            String cellText = table.getCell(row, col).getText().trim();
+                            rowData[col] = cellText;
+
+                            if (cellText.isEmpty()) {
+                                isEmpty = true;
+                            }
                         }
-                        tableData.add(rowData);
+
+                        if (!isEmpty) {
+                            tableData.add(rowData);
+                        }
                     }
                 }
             }
@@ -168,6 +204,7 @@ public class Main {
         }
         return tableData;
     }
+
 
     private static void writeTableToCSV(String csvPath, List<String[]> data) throws IOException {
         /**
@@ -189,27 +226,3 @@ public class Main {
         }
     }
 }
-
-
-
-//String supplier = table.getCell(row,0).getText();
-//String supplerNo = table.getCell(row,1).getText();
-//String invoiceDocument = table.getCell(row,2).getText();
-//String invoiceNumber = table.getCell(row,3).getText();
-//String invoiceDate = table.getCell(row,4).getText();
-//String grossAmount = table.getCell(row,5).getText();
-//String discountAmount = table.getCell(row,6).getText();
-//String netAmount = table.getCell(row,7).getText();
-//
-//                        filteredData.add(new String[]{
-//    supplier, supplerNo, invoiceDocument, invoiceNumber, invoiceDate, grossAmount, discountAmount, netAmount,
-//});
-
-
-//        String pdfPath = "C:\\Users\\MadhuShekhawat\\Downloads\\GA.PDF";
-//        File file = new File(pdfPath);
-//        if (file.exists()) {
-//            System.out.println("File found!");
-//        } else {
-//            System.out.println("File not found!");
-//        }
