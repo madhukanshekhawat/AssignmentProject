@@ -27,29 +27,43 @@ public class Main {
             List<String[]> csvData = new ArrayList<>();
             // Step 1: Extract supplier details
             String[] supplierDetails = extractSupplierDetails(pdfPath);
-            if (supplierDetails != null) {
-                csvData.add(new String[]{supplierDetails[0]});
-                csvData.add(new String[]{supplierDetails[1]});
-                csvData.add(new String[]{supplierDetails[2]});
-            }
 
             // Step 2: Extract payment details
             String[] paymentDetails = extractPaymentDetails(pdfPath);
-            if (paymentDetails != null) {
-                csvData.add(new String[]{paymentDetails[0]});
-                csvData.add(new String[]{paymentDetails[1]});
-            }
 
             // Add the header row
             addBoldHeaderRow(csvData);
 
-            // Step 3: Extract table data
+            // Step 3: Extract table data and prepend supplier/payment details
             List<String[]> tableData = extractTableDataFromPdf(pdfPath);
-            csvData.addAll(tableData);
+            if (supplierDetails != null && paymentDetails != null) {
+
+                // Prepend supplier and payment details to each row in tableData
+                List<String[]> updatedTableData = new ArrayList<>();
+                for (String[] row : tableData) {
+                    String[] updatedRow = new String[row.length + 5];
+                    if (supplierDetails != null) {
+                        updatedRow[0] = supplierDetails[0];
+                        updatedRow[1] = supplierDetails[1];
+                        updatedRow[2] = supplierDetails[2].replaceAll("^Date:\\s*", "").trim();
+                    }
+                    if (paymentDetails != null) {
+                        updatedRow[3] = paymentDetails[0].replace("Payment Document:", "").trim();
+                        updatedRow[4] = paymentDetails[1].replace("Currency:", "").trim();
+                    }
+
+                    // Copy the rest of the row data
+                    System.arraycopy(row, 0, updatedRow, 5, row.length);
+
+                    updatedTableData.add(updatedRow);
+                }
+
+                csvData.addAll(updatedTableData);
+            }
 
             // Step 4: Calculate total gross amount
             double totalGrossAmount = calculateTotalGrossAmount(tableData);
-            csvData.add(new String[]{"","","Total Sum", String.format("%.2f", totalGrossAmount)});
+            csvData.add(new String[]{"","","","","","","","Total Sum", String.format("%.2f", totalGrossAmount)});
 
             // Write to CSV
             writeTableToCSV(csvPath, csvData);
@@ -62,6 +76,7 @@ public class Main {
 
     private static void addBoldHeaderRow(List<String[]> csvData) {
         csvData.add(new String[]{
+                "Supplier", "Supplier No.", "Date", "Payment Document", "Currency",
                 "Invoice Document", "Invoice Number", "Invoice Date",
                 "Gross Amount", "Discount Amount", "Net Amount"
         });
@@ -144,8 +159,8 @@ public class Main {
                         if (!supplier.isEmpty() && !supplierNo.isEmpty() && !date.isEmpty()) {
                             extractor.close();
                             return new String[]{
-                                    "Supplier: " + supplier,
-                                    "Supplier No.: " + supplierNo,
+                                    supplier,
+                                    supplierNo,
                                     date
                             };
                         }
