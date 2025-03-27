@@ -17,7 +17,7 @@ public class Main {
     public static void main(String[] args) {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 
-        try{
+        try {
             System.out.println("Enter Pdf File Path:");
             String pdfPath = reader.readLine().replace("file:///", "").replace("/", "\\\\");
 
@@ -32,7 +32,7 @@ public class Main {
             String[] paymentDetails = extractPaymentDetails(pdfPath);
 
             // Add the header row
-            addBoldHeaderRow(csvData);
+            addHeaderRow(csvData);
 
             // Step 3: Extract table data and prepend supplier/payment details
             List<String[]> tableData = extractTableDataFromPdf(pdfPath);
@@ -63,7 +63,7 @@ public class Main {
 
             // Step 4: Calculate total gross amount
             double totalGrossAmount = calculateTotalGrossAmount(tableData);
-            csvData.add(new String[]{"","","","","","","","Total Sum", String.format("%.2f", totalGrossAmount)});
+            csvData.add(new String[]{"Total Sum: " + String.format("%.2f", totalGrossAmount)});
 
             // Write to CSV
             writeTableToCSV(csvPath, csvData);
@@ -74,22 +74,18 @@ public class Main {
         }
     }
 
-    private static void addBoldHeaderRow(List<String[]> csvData) {
-        csvData.add(new String[]{
-                "Supplier", "Supplier No.", "Date", "Payment Document", "Currency",
-                "Invoice Document", "Invoice Number", "Invoice Date",
-                "Gross Amount", "Discount Amount", "Net Amount"
-        });
+    private static void addHeaderRow(List<String[]> csvData) {
+        csvData.add(new String[]{"Supplier", "Supplier No.", "Date", "Payment Document", "Currency", "Invoice Document", "Invoice Number", "Invoice Date", "Gross Amount", "Discount Amount", "Net Amount", "Check Message"});
     }
 
     private static double calculateTotalGrossAmount(List<String[]> tableData) {
         double total = 0.0;
 
         for (String[] row : tableData) {
-            if (row.length > 3) { // Check if the row has at least 4 columns
+            if (row.length > 3) {
                 try {
                     String grossAmountStr = row[3].trim();
-                    if (!grossAmountStr.isEmpty()) { // Check if the gross amount is not empty
+                    if (!grossAmountStr.isEmpty()) {
                         double grossAmount = Double.parseDouble(grossAmountStr.replace(",", ""));
                         total += grossAmount;
                     }
@@ -122,8 +118,7 @@ public class Main {
                             String currency = table.getCell(row, 2).getText().trim();
 
                             // Validate that both fields are non-empty
-                            if (!paymentDocument.isEmpty() && !currency.isEmpty() &&
-                                    paymentDocument.toLowerCase().contains("payment document")) {
+                            if (!paymentDocument.isEmpty() && !currency.isEmpty() && paymentDocument.toLowerCase().contains("payment document")) {
                                 extractor.close();
                                 return new String[]{paymentDocument, currency};
                             }
@@ -158,11 +153,7 @@ public class Main {
 
                         if (!supplier.isEmpty() && !supplierNo.isEmpty() && !date.isEmpty()) {
                             extractor.close();
-                            return new String[]{
-                                    supplier,
-                                    supplierNo,
-                                    date
-                            };
+                            return new String[]{supplier, supplierNo, date};
                         }
                     }
                 }
@@ -171,7 +162,6 @@ public class Main {
         }
         return null;
     }
-
 
     private static List<String[]> extractTableDataFromPdf(String pdfPath) throws IOException {
         List<String[]> tableData = new ArrayList<>();
@@ -187,25 +177,43 @@ public class Main {
                 for (Table table : tables) {
                     for (int row = 0; row < table.getRowCount(); row++) {
                         String firstColumn = table.getCell(row, 0).getText().trim();
+
+                        // Skip rows that don't contain meaningful data
                         if (row < 3) continue;
 
-                        if (firstColumn.toLowerCase().contains("sum total") ||
-                                firstColumn.toLowerCase().contains("balance carry forward") ||
-                                firstColumn.toLowerCase().contains("invoice document") ||
-                                firstColumn.toLowerCase().contains("payment document")) {
+                        if (firstColumn.toLowerCase().contains("sum total") || firstColumn.toLowerCase().contains("balance carry forward") || firstColumn.toLowerCase().contains("invoice document") || firstColumn.toLowerCase().contains("payment document")) {
                             continue;
                         }
 
                         int columnCount = table.getColCount();
-                        String[] rowData = new String[columnCount];
+                        String[] rowData = new String[columnCount + 1];
                         boolean isEmpty = false;
 
                         for (int col = 0; col < columnCount; col++) {
                             String cellText = table.getCell(row, col).getText().trim();
+
+                            // Skip "Check Message:" prefix for relevant columns
+                            if (cellText.toLowerCase().contains("check message:")) {
+                                cellText = cellText.replace("Check Message:", "").trim();
+                            }
+
                             rowData[col] = cellText;
 
                             if (cellText.isEmpty()) {
                                 isEmpty = true;
+                            }
+                        }
+
+                        // Process "Invoice Number" to split and extract values
+                        if (rowData.length > 1) {
+                            String invoiceData = rowData[1];
+                            String[] invoiceNumbers = invoiceData.split("\\s+"); // Split by whitespace
+
+                            if (invoiceNumbers.length > 1) {
+                                rowData[1] = invoiceNumbers[0];
+                                rowData[columnCount] = invoiceNumbers[1];
+                            } else {
+                                rowData[columnCount] = "";
                             }
                         }
 
@@ -220,8 +228,7 @@ public class Main {
         return tableData;
     }
 
-
-    private static void writeTableToCSV(String csvPath, List<String[]> data) throws IOException {
+    private static void writeTableToCSV(String csvPath, List<String[]> tableData) throws IOException {
         /**
          * Using Apache Commons CSV instead of OpenCSV
          * OpenCSV dependency (CSVWriter) was previously used but has some limitations:
@@ -233,10 +240,25 @@ public class Main {
 //        try(CSVWriter writer = new CSVWriter(new FileWriter(csvPath))){
 //            writer.writeAll(data);
 //        }
-        try(FileWriter out = new FileWriter(csvPath);
-            CSVPrinter printer = new CSVPrinter(out,CSVFormat.DEFAULT)){
-            for(String[] row: data){
-                printer.printRecord((Object[]) row);
+        try (FileWriter out = new FileWriter(csvPath); CSVPrinter printer = new CSVPrinter(out, CSVFormat.DEFAULT)) {
+            for (String[] originalRow : tableData) {
+                if (originalRow.length > 0) {
+                    int columnToMove = originalRow.length - 1;
+                    String valueToMove = originalRow[columnToMove];
+                    String[] reorderedRow = new String[originalRow.length];
+                    int targetIndex = 0;
+                    for (int i = 0; i < originalRow.length; i++) {
+                        if (i == columnToMove) continue;
+                        if (targetIndex == 7) targetIndex++;
+                        reorderedRow[targetIndex++] = originalRow[i];
+                    }
+                    if (7 < reorderedRow.length) {
+                        reorderedRow[7] = valueToMove;
+                    } else {
+                        reorderedRow[reorderedRow.length - 1] = valueToMove;
+                    }
+                    printer.printRecord((Object[]) reorderedRow);
+                }
             }
         }
     }
