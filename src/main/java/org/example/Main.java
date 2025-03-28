@@ -11,6 +11,7 @@ import technology.tabula.extractors.SpreadsheetExtractionAlgorithm;
 
 import java.io.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class Main {
@@ -25,6 +26,7 @@ public class Main {
             String csvPath = reader.readLine().replace("file:///", "").replace("/", "\\\\");
 
             List<String[]> csvData = new ArrayList<>();
+
             // Step 1: Extract supplier details
             String[] supplierDetails = extractSupplierDetails(pdfPath);
 
@@ -63,7 +65,17 @@ public class Main {
 
             // Step 4: Calculate total gross amount
             double totalGrossAmount = calculateTotalGrossAmount(tableData);
-            csvData.add(new String[]{"Total Sum: " + String.format("%.2f", totalGrossAmount)});
+            double totalDiscountAmount = calculateTotalDiscountAmount(tableData);
+            double totalNetAmount = calculateTotalNetAmount(tableData);
+
+            String[] csvRow = new String[12];
+            Arrays.fill(csvRow, 0, 8, "");
+            csvRow[8] = "Total Sum";
+            csvRow[9] = String.format("%.2f", totalGrossAmount);
+            csvRow[10] = String.valueOf(totalDiscountAmount);
+            csvRow[11] = String.valueOf(totalNetAmount);
+
+            csvData.add(csvRow);
 
             // Write to CSV
             writeTableToCSV(csvPath, csvData);
@@ -72,6 +84,46 @@ public class Main {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static double calculateTotalNetAmount(List<String[]> tableData) {
+        double total = 0.0;
+        for (String[] row : tableData){
+            if (row.length > 5){
+                try {
+                    String netAmountStr = row[5].trim();
+                    if (!netAmountStr.isEmpty()){
+                        double netAmount = Double.parseDouble(netAmountStr.replace(",", ""));
+                        total += netAmount;
+                    }
+                } catch (NumberFormatException e) {
+                    throw new RuntimeException(e);
+                }
+            } else {
+                System.err.println("Row has fewer columns, skipping.");
+            }
+        }
+        return total;
+    }
+
+    private static double calculateTotalDiscountAmount(List<String[]> tableData) {
+        double total = 0.0;
+        for (String[] row : tableData){
+            if (row.length > 4){
+                try {
+                    String discAmountStr = row[4].trim();
+                    if (!discAmountStr.isEmpty()){
+                        double discAmount = Double.parseDouble(discAmountStr.replace(",", ""));
+                        total += discAmount;
+                    }
+                } catch (NumberFormatException e) {
+                    throw new RuntimeException(e);
+                }
+            } else {
+                System.err.println("Row has fewer columns, skipping.");
+            }
+        }
+        return total;
     }
 
     private static void addHeaderRow(List<String[]> csvData) {
@@ -240,9 +292,16 @@ public class Main {
 //        try(CSVWriter writer = new CSVWriter(new FileWriter(csvPath))){
 //            writer.writeAll(data);
 //        }
-        try (FileWriter out = new FileWriter(csvPath); CSVPrinter printer = new CSVPrinter(out, CSVFormat.DEFAULT)) {
-            for (String[] originalRow : tableData) {
+        try (FileWriter out = new FileWriter(csvPath);
+             CSVPrinter printer = new CSVPrinter(out, CSVFormat.DEFAULT)) {
+            int rowCount = tableData.size(); // Get total number of rows
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+                String[] originalRow = tableData.get(rowIndex);
                 if (originalRow.length > 0) {
+                    if (rowIndex == rowCount - 1) { // If it's the last row, don't reorder
+                        printer.printRecord((Object[]) originalRow);
+                        continue;
+                    }
                     int columnToMove = originalRow.length - 1;
                     String valueToMove = originalRow[columnToMove];
                     String[] reorderedRow = new String[originalRow.length];
